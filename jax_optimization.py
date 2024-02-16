@@ -164,7 +164,7 @@ def run_jit_rdp_final(Loss, w_init, clip, \
     #where etas is samples from the RDP mechanism
     #with sensitivity of gradient is 2 * lipschitz constant / dataset size
     etas = bins + jitter
-    etas = etas * clipping_array[0] / Loss.n_
+    etas = etas * 2 * clipping_array[0] / Loss.n_
     
     #this function does one iteration
     def inner_loop(j_temp, tup):
@@ -248,7 +248,7 @@ def run_jit_gauss_final(Loss, w_init, clip, \
     
     #create effective sigma array by doing sigma_new = (sensitivity) * sigma_input
     #because sensitivity of gradient is 2 * lipschitz constant / dataset size
-    effective_sigma_array = sigma_array * clipping_array / Loss.n_
+    effective_sigma_array = sigma_array * 2 * clipping_array / Loss.n_
 
     #see equation 
     #this function does one iteration
