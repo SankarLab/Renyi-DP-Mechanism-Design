@@ -6,24 +6,17 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Union
 
 
-'''
-Notes:
-
-    Only coordinate descent logistic regression is implemented as this time, but all the archetecture needed
-    for proximal coordnate descent lasso is here. 
-
-'''
 class Abstract_Loss(ABC):
 
     '''
     This is an awkward class. Its not really a class, because the 
     internal states, i.e. data = (X,y) and regularization,
-    are constants. This class is more of a convienent wrapper for
+    are constants. This class is more of a convenience wrapper for
     a bunch of Jax functions. 
-
     '''
+    
     def objective(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
-        return self.eval_objective(w, res) + self.eval_regularizer(w)
+        return self.eval_objective(res) + self.eval_regularizer(w)
         
     def coordinate_gradient(self, 
                             w: jnp.ndarray, 
@@ -32,14 +25,14 @@ class Abstract_Loss(ABC):
                             clip: float) -> float:
         """
         Get total coordinate gradient. It gets the 
-        per sample gradinet from loss and clips it. It
+        per sample gradient from loss and clips it. It
         then adds the regularizer gradient to this. Note: 
         I do not clip the regularizer gradient, since it is
         independent of the private data, hence a post processing. 
         """
 
         #output is a jnp array
-        obj_gradient = self.vectorized_per_sample_coordinate_gradient(w, j, res)
+        obj_gradient = self.vectorized_per_sample_coordinate_gradient(j, res)
 
         #output is a float
         average_clipped_obj_gradient = jnp.mean(jnp.clip( obj_gradient , a_min = -clip, a_max = clip))
@@ -48,38 +41,95 @@ class Abstract_Loss(ABC):
         regularizer_gradient = self.regularizer_coord_gradient(w, j)
 
         return average_clipped_obj_gradient + regularizer_gradient
-
-    @abstractmethod
-    def vectorized_per_sample_coordinate_gradient(self, w: jnp.ndarray, j: int, res: jnp.ndarray) -> jnp.ndarray:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for an objective coordinate gradient.")
     
-    @abstractmethod
-    def regularizer_coord_gradient(self, w: jnp.ndarray, j: int) -> float:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for a regularizer coordinate gradient.")
-    @abstractmethod
-    def vector_residuals(self, w: jnp.ndarray) -> jnp.ndarray:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for residuals.")
-    @abstractmethod 
-    def eval_objective(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for objective.")
-    @abstractmethod
     def eval_probs(self, w: jnp.ndarray, res: jnp.ndarray) -> jnp.ndarray:
+        ''' Used for Logistic Regression but not Lasso '''
         raise NotImplementedError(f"{type(self)} has not provided an implementation for probs.")
-    @abstractmethod
+
     def eval_predictions(self, w: jnp.ndarray, res: jnp.ndarray) -> jnp.ndarray:
+        ''' Used for Logistic Regression but not Lasso '''
         raise NotImplementedError(f"{type(self)} has not provided an implementation for predictions.")
-    @abstractmethod
-    def accuracy(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for accuracy.")
+
+    @abstractmethod 
+    def eval_objective(self, res: jnp.ndarray) -> float:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for objective.")
+        
     @abstractmethod 
     def eval_regularizer(self, w: jnp.ndarray) -> float:
         raise NotImplementedError(f"{type(self)} has not provided an implementation for regularizer.")
-    @abstractmethod 
-    def coord_prox(self, updated_wj: float, stepsize: float) -> float:
-        raise NotImplementedError(f"{type(self)} has not provided an implementation for coord_prox.")
+    
+    @abstractmethod
+    def vector_residuals(self, w: jnp.ndarray) -> jnp.ndarray:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for residuals.")
+        
     @abstractmethod
     def update_residuals(self, res: jnp.ndarray, diff_w: float, j: int) -> jnp.ndarray:
         raise NotImplementedError(f"{type(self)} has not provided an implementation for updating residuals.")
+        
+    @abstractmethod 
+    def accuracy(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for accuracy.")
+        
+    @abstractmethod
+    def regularizer_coord_gradient(self, w: jnp.ndarray, j: int) -> float:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for a regularizer coordinate gradient.")
+        
+    @abstractmethod
+    def vectorized_per_sample_coordinate_gradient(self, j: int, res: jnp.ndarray) -> jnp.ndarray:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for an objective coordinate gradient.")
+        
+    @abstractmethod 
+    def coord_prox(self, updated_wj: float, stepsize: float) -> float:
+        raise NotImplementedError(f"{type(self)} has not provided an implementation for coord_prox.")
+    
+
+        
+class Lasso_Loss(Abstract_Loss):
+    
+    def __init__(self, 
+                 data: Tuple,
+                 regularization: float) -> None:
+        
+        self.X_ = data[0]
+        self.y_ = data[1]
+        self.n_ = data[0].shape[0]
+        self.p_ = data[0].shape[1]
+        self.regularizer = regularization
+        
+        X2_feat_bound_squared = jnp.mean( jnp.power(self.X_, 2), axis = 0)
+        self.vec_coord_lipschitz = X2_feat_bound_squared
+        
+    def eval_objective(self, res: jnp.ndarray) -> float:
+        return jnp.mean( jnp.power(res, 2) ) / 2
+    
+    def eval_regularizer(self, w: jnp.ndarray) -> float:
+        return self.regularizer * jnp.linalg.norm(w, ord = 1)
+    
+    def vector_residuals(self, w: jnp.ndarray) -> jnp.ndarray:
+        return jnp.dot(self.X_, w) - self.y_
+        
+    def update_residuals(self, res: jnp.ndarray, diff_w: float, j: int) -> jnp.ndarray:
+        X_jcol = jnp.take(self.X_, j, axis = 1)
+        return res + X_jcol * diff_w
+        
+    def accuracy(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
+        ''' Since res = prediction error for Lasso'''
+        return jnp.mean( jnp.power(res,2) )
+    
+    def regularizer_coord_gradient(self, w: jnp.ndarray, j: int) -> float:
+        '''
+        Proximal GD does not use regularizer grad. So we set it to 0
+        even though it is technically equal to self.regularizer.
+        '''
+        return 0 
+        
+    def vectorized_per_sample_coordinate_gradient(self, j: int, res: jnp.ndarray) -> jnp.ndarray:
+        X_jcol = jnp.take(self.X_, j, axis = 1)
+        return X_jcol * res
+
+    def coord_prox(self, updated_wj: float, stepsize: float) -> float:
+        return jnp.sign(updated_wj) * jax.nn.relu(jnp.abs(updated_wj) - self.regularizer * stepsize)
+
 
 class Logistic_Loss(Abstract_Loss):
     
@@ -87,27 +137,32 @@ class Logistic_Loss(Abstract_Loss):
                  data: Tuple,
                  regularization: float) -> None:
         
-
         self.X_ = data[0]
         self.y_ = data[1]
         self.n_ = data[0].shape[0]
         self.p_ = data[0].shape[1]
-
-        # singular_values = jnp.linalg.svd(self.X_, compute_uv=False)
-        # self.lipschitz = 0.25 / self.n_ * jnp.max(singular_values)**2
-
-        #Note: add regularization to coordinate lipschitz
-        X2_feat_bound_squared = jnp.mean( jnp.power(self.X_, 2), axis = 0)  #jnp.linalg.norm(self.X_, ord = 2, axis = 0)
-        self.vec_coord_lipschitz = 0.25 * X2_feat_bound_squared + regularization      # 0.25 / self.n_ * self.X2_feat_bound_**2
-        
         self.regularizer = regularization
         
-    def eval_objective(self, w: jnp.ndarray, res: jnp.ndarray) -> float:
+        #Note: add regularization to coordinate lipschitz
+        X2_feat_bound_squared = jnp.mean( jnp.power(self.X_, 2), axis = 0)
+        self.vec_coord_lipschitz = 0.25 * X2_feat_bound_squared + regularization
+        
+    def eval_objective(self, res: jnp.ndarray) -> float:
         return jnp.mean( jax.nn.softplus(- res) )
         # exp_arr = 1 + jnp.exp(- res)
         # arr = jnp.log(exp_arr)
         # return jnp.mean(arr) 
     
+    def eval_regularizer(self, w: jnp.ndarray) -> float:
+        return 0.5 * self.regularizer *  jnp.sum(jnp.power(w, 2))
+    
+    def vector_residuals(self, w: jnp.ndarray) -> jnp.ndarray:
+        return self.y_ * jnp.dot(self.X_, w) 
+        
+    def update_residuals(self, res: jnp.ndarray, diff_w: float, j: int) -> jnp.ndarray:
+        X_jcol = jnp.take(self.X_, j, axis = 1)
+        return res + self.y_ * X_jcol * diff_w
+        
     def eval_probs(self, w: jnp.ndarray, res: jnp.ndarray) -> jnp.ndarray:
         log_probs = jax.nn.log_sigmoid( jnp.dot(self.X_, w) )
         return jnp.exp(log_probs)
@@ -124,21 +179,10 @@ class Logistic_Loss(Abstract_Loss):
         bool_array = (preds == self.y_ )
         return jnp.mean( jnp.array(bool_array ) )
         
-    def eval_regularizer(self, w: jnp.ndarray) -> float:
-        return 0.5 * self.regularizer *  jnp.sum(jnp.power(w, 2))
-        
-    def vector_residuals(self, w: jnp.ndarray) -> jnp.ndarray:
-        return self.y_ * jnp.dot(self.X_, w) 
-        
-    def update_residuals(self, res: jnp.ndarray, diff_w: float, j: int) -> jnp.ndarray:
-        X_jcol = jnp.take(self.X_, j, axis = 1)
-        return res + self.y_ * X_jcol * diff_w
-        
     def regularizer_coord_gradient(self, w: jnp.ndarray, j: int) -> float:
         return self.regularizer * w[j] 
         
-    def vectorized_per_sample_coordinate_gradient(self, w: jnp.ndarray, j: int, res: jnp.ndarray):
-        # res = self.vector_residuals(w)
+    def vectorized_per_sample_coordinate_gradient(self, j: int, res: jnp.ndarray):
         X_jcol = jnp.take(self.X_, j, axis = 1)
         return - self.y_ / (1.0 + jnp.exp(res)) * X_jcol
 
@@ -164,7 +208,7 @@ def run_jit_gauss_final(Loss, w_init, clip, \
     stepsize_array = learning_rate / Loss.vec_coord_lipschitz
 
     #create clipping aray
-    lipalpha = Loss.vec_coord_lipschitz #jnp.power(Loss.vec_coord_lipschitz, alpha_clip)
+    lipalpha = Loss.vec_coord_lipschitz
     lipsum = jnp.sum(lipalpha) 
     clipping_array = clip * jnp.sqrt(lipalpha / lipsum)
     
@@ -245,7 +289,7 @@ def run_jit_rdp_final(Loss, w_init, clip, \
     stepsize_array = learning_rate / Loss.vec_coord_lipschitz
 
     #create clipping aray
-    lipalpha = Loss.vec_coord_lipschitz #jnp.power(Loss.vec_coord_lipschitz, alpha_clip)
+    lipalpha = Loss.vec_coord_lipschitz
     lipsum = jnp.sum(lipalpha) 
     clipping_array = clip * jnp.sqrt(lipalpha / lipsum)
     assert jnp.all(clipping_array == clipping_array)
