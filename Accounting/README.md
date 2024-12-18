@@ -21,3 +21,8 @@ dots uses this function, i.e. ```get_delta_for_epsilon```, to construct a domina
 
 The only other part left to explain in the code is how we tell Connect the Dots which region of epsilons to construct the PLD over. This is handeled
 by two functions ```privacy_loss_tail``` and ```connect_dots_bounds```. I will add an explanation on how these functions work later.
+
+## Subsampling
+Technically this code can also account for the RDP Optimized mechanism under composition  with Poisson subsampling via the function ```_pld_for_subsampled_mechanism```
+, but I (Felipe) have not tested it. For now, please do not subsample. If you simply set the subsampling paraemter to 1, the function
+```_pld_for_subsampled_mechanism``` does not do anything (i.e. it just returns the input pld). 
